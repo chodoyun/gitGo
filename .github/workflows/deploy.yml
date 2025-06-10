@@ -54,9 +54,15 @@ jobs:
         # 애플리케이션이 시작될 때까지 대기
         echo "Waiting for application to start..."
         for i in {1..10}; do
-          if curl -s http://localhost:8000/health > /dev/null; then
-            echo "Application is running!"
-            break
+          # 실행 중인 포트 확인
+          PORT=$(lsof -i :8000 -t)
+          if [ ! -z "$PORT" ]; then
+            echo "Application is running on port 8000!"
+            # 헬스 체크
+            if curl -s http://127.0.0.1:8000/health > /dev/null; then
+              echo "Health check passed!"
+              break
+            fi
           fi
           if [ $i -eq 10 ]; then
             echo "Application failed to start"
