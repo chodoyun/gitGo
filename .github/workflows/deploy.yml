@@ -1,4 +1,3 @@
-
 name: Simple Build and Test
 
 on:
@@ -43,5 +42,16 @@ jobs:
       run: |
         if [ -z "$DB_SERVER" ]; then echo "DB_SERVER not set"; exit 1; fi
         if [ -z "$DB_USER" ]; then echo "DB_USER not set"; exit 1; fi
+        if [ -z "$DB_PASSWORD" ]; then echo "DB_PASSWORD not set"; exit 1; fi
+        if [ -z "$DB_PORT" ]; then echo "DB_PORT not set"; exit 1; fi
+        if [ -z "$DB_NAME" ]; then echo "DB_NAME not set"; exit 1; fi
         if [ -z "$API_KEY" ]; then echo "API_KEY not set"; exit 1; fi
         echo "All environment variables are set correctly"
+    
+    # DB 연결 테스트
+    - name: Test database connection
+      run: |
+        go run main.go &
+        sleep 5
+        curl -f http://localhost:8000/health || exit 1
+        echo "Database connection test successful"
