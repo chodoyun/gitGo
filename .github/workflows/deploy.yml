@@ -58,21 +58,33 @@ jobs:
         # 서버가 시작될 때까지 대기
         echo "Waiting for server to start..."
         for i in {1..30}; do
-          if curl -s http://localhost:8000/health > /dev/null; then
+          if curl -s --connect-timeout 5 http://localhost:8000/health > /dev/null; then
             echo "Server is up!"
             break
           fi
           if [ $i -eq 30 ]; then
             echo "Server failed to start"
-            kill $SERVER_PID
+            if ps -p $SERVER_PID > /dev/null; then
+              kill $SERVER_PID
+            fi
             exit 1
           fi
-          sleep 1
+          echo "Attempt $i: Waiting for server..."
+          sleep 2
         done
         
         # 헬스체크 테스트
-        curl -f http://localhost:8000/health || exit 1
-        echo "Database connection test successful"
+        if curl -s --connect-timeout 5 http://localhost:8000/health | grep -q "healthy"; then
+          echo "Database connection test successful"
+        else
+          echo "Database connection test failed"
+          if ps -p $SERVER_PID > /dev/null; then
+            kill $SERVER_PID
+          fi
+          exit 1
+        fi
         
         # 서버 종료
-        kill $SERVER_PID
+        if ps -p $SERVER_PID > /dev/null; then
+          kill $SERVER_PID
+        fi
