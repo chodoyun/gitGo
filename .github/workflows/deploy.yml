@@ -51,7 +51,28 @@ jobs:
     # DB 연결 테스트
     - name: Test database connection
       run: |
-        go run main.go &
-        sleep 5
+        # 서버 시작
+        ./main &
+        SERVER_PID=$!
+        
+        # 서버가 시작될 때까지 대기
+        echo "Waiting for server to start..."
+        for i in {1..30}; do
+          if curl -s http://localhost:8000/health > /dev/null; then
+            echo "Server is up!"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo "Server failed to start"
+            kill $SERVER_PID
+            exit 1
+          fi
+          sleep 1
+        done
+        
+        # 헬스체크 테스트
         curl -f http://localhost:8000/health || exit 1
         echo "Database connection test successful"
+        
+        # 서버 종료
+        kill $SERVER_PID
