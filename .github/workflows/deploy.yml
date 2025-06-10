@@ -1,13 +1,14 @@
-name: Simple Build and Test
+name: Build and Run
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:  # 수동 실행 옵션 추가
 
 jobs:
-  build-and-test:
+  build-and-run:
     runs-on: ubuntu-latest
     
     env:
@@ -30,14 +31,10 @@ jobs:
       run: go mod download
     
     - name: Build
-      run: go build -v ./...
-    
-    - name: Test build
       run: |
-        go build -o main .
+        go build -v ./...
         echo "Build successful!"
     
-    # 환경변수가 제대로 설정되었는지 확인 (실제 값은 출력하지 않음)
     - name: Verify environment variables
       run: |
         if [ -z "$DB_SERVER" ]; then echo "DB_SERVER not set"; exit 1; fi
@@ -47,3 +44,36 @@ jobs:
         if [ -z "$DB_NAME" ]; then echo "DB_NAME not set"; exit 1; fi
         if [ -z "$API_KEY" ]; then echo "API_KEY not set"; exit 1; fi
         echo "All environment variables are set correctly"
+    
+    - name: Run application
+      run: |
+        echo "Starting application..."
+        ./main &
+        APP_PID=$!
+        
+        # 애플리케이션이 시작될 때까지 대기
+        echo "Waiting for application to start..."
+        for i in {1..10}; do
+          if curl -s http://localhost:8000/health > /dev/null; then
+            echo "Application is running!"
+            break
+          fi
+          if [ $i -eq 10 ]; then
+            echo "Application failed to start"
+            if ps -p $APP_PID > /dev/null; then
+              kill $APP_PID
+            fi
+            exit 1
+          fi
+          echo "Attempt $i: Waiting for application..."
+          sleep 2
+        done
+        
+        # 애플리케이션 로그 확인
+        echo "Application logs:"
+        ps aux | grep main
+        
+        # 애플리케이션 종료
+        if ps -p $APP_PID > /dev/null; then
+          kill $APP_PID
+        fi
