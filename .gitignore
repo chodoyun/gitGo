@@ -1,2 +1,18 @@
-.env
+
 main.go.bak
+
+# 환경 변수 파일
+.env
+.env.local
+.env.production
+
+# 빌드 파일
+main
+*.exe
+
+# 로그 파일
+*.log
+
+# IDE 설정
+.vscode/
+.idea/
