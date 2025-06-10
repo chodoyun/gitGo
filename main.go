@@ -17,47 +17,84 @@ import (
 // DB 연결 변수(MSSQL)
 var db *sql.DB
 
+// 설정 구조체
+type Config struct {
+	DBServer   string
+	DBUser     string
+	DBPassword string
+	DBPort     string
+	DBName     string
+	APIKey     string
+	Port       string
+}
+
+// 환경변수 로드 함수
+func loadConfig() *Config {
+	// .env 파일이 존재하면 로드 (개발환경용)
+	if _, err := os.Stat(".env"); err == nil {
+		err := godotenv.Load()
+		if err != nil {
+			log.Println("Warning: .env 파일 로드 실패, 시스템 환경변수 사용")
+		}
+	}
+
+	config := &Config{
+		DBServer:   getEnv("DB_SERVER", ""),
+		DBUser:     getEnv("DB_USER", ""),
+		DBPassword: getEnv("DB_PASSWORD", ""),
+		DBPort:     getEnv("DB_PORT", "1433"),
+		DBName:     getEnv("DB_NAME", ""),
+		APIKey:     getEnv("API_KEY", ""),
+		Port:       getEnv("PORT", "8000"),
+	}
+
+	// 필수 환경변수 검증
+	if config.DBServer == "" || config.DBUser == "" || config.DBPassword == "" ||
+		config.DBName == "" || config.APIKey == "" {
+		log.Fatal("필수 환경변수가 설정되지 않았습니다. DB_SERVER, DB_USER, DB_PASSWORD, DB_NAME, API_KEY를 확인하세요.")
+	}
+
+	return config
+}
+
+// 환경변수 값 가져오기 (기본값 포함)
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
 // API 키 인증 미들웨어
-func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		apiKey := r.Header.Get("X-API-Key")
-		if apiKey == "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "API 키가 필요합니다"})
-			return
-		}
+func authMiddleware(apiKey string) func(http.HandlerFunc) http.HandlerFunc {
+	return func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			requestAPIKey := r.Header.Get("X-API-Key")
+			if requestAPIKey == "" {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "API 키가 필요합니다"})
+				return
+			}
 
-		// API 키 검증 (실제 환경에서는 DB에서 검증하는 것이 좋습니다)
-		if apiKey != os.Getenv("API_KEY") {
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "유효하지 않은 API 키입니다"})
-			return
-		}
+			if requestAPIKey != apiKey {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "유효하지 않은 API 키입니다"})
+				return
+			}
 
-		next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r)
+		}
 	}
 }
 
 // DB 연결 함수
-func connectDB() {
-	// .env 파일 로드
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
-	}
-
-	// 환경 변수에서 DB 접속 정보 가져오기
-	dbServer := os.Getenv("DB_SERVER")
-	dbUser := os.Getenv("DB_USER")
-	dbPassword := os.Getenv("DB_PASSWORD")
-	dbPort := os.Getenv("DB_PORT")
-	dbName := os.Getenv("DB_NAME")
-
+func connectDB(config *Config) {
 	// MSSQL 연결 문자열
 	connString := fmt.Sprintf("server=%s;user id=%s;password=%s;port=%s;database=%s",
-		dbServer, dbUser, dbPassword, dbPort, dbName)
+		config.DBServer, config.DBUser, config.DBPassword, config.DBPort, config.DBName)
 
 	// DB 연결
+	var err error
 	db, err = sql.Open("mssql", connString)
 	if err != nil {
 		log.Fatal("DB 연결 실패:", err)
@@ -82,13 +119,24 @@ type Book struct {
 
 var books []Book
 
+// 헬스체크 엔드포인트 추가
+func HealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "healthy",
+		"time":   time.Now().Format(time.RFC3339),
+	})
+}
+
 // 모든 책 정보 조회
 func GetBooks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(books)
 }
 
 // 특정 ID의 책 정보 조회
 func GetBook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
 	id := params["id"]
 
@@ -106,6 +154,7 @@ func GetBook(w http.ResponseWriter, r *http.Request) {
 
 // 새로운 책 추가
 func CreateBook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	var book Book
 	err := json.NewDecoder(r.Body).Decode(&book)
 	if err != nil {
@@ -120,7 +169,7 @@ func CreateBook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("DB 에러: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "책 정보 추가 실패: " + err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": "책 정보 추가 실패"})
 		return
 	}
 
@@ -142,6 +191,7 @@ func CreateBook(w http.ResponseWriter, r *http.Request) {
 
 // 책 정보 수정
 func UpdateBook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
 	id := params["id"]
 
@@ -159,7 +209,7 @@ func UpdateBook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("DB 에러: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "책 정보 수정 실패: " + err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": "책 정보 수정 실패"})
 		return
 	}
 
@@ -202,6 +252,7 @@ func UpdateBook(w http.ResponseWriter, r *http.Request) {
 
 // 책 삭제
 func DeleteBook(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
 	id := params["id"]
 
@@ -211,7 +262,7 @@ func DeleteBook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("DB 에러: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "책 삭제 실패: " + err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": "책 삭제 실패"})
 		return
 	}
 
@@ -243,8 +294,11 @@ func DeleteBook(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// 설정 로드
+	config := loadConfig()
+
 	// DB 연결
-	connectDB()
+	connectDB(config)
 	defer db.Close()
 
 	// 테이블 구조 확인을 위한 쿼리
@@ -288,14 +342,22 @@ func main() {
 		books = append(books, book)
 	}
 
-	router := mux.NewRouter()
-	//라우터 설정
-	router.HandleFunc("/books", authMiddleware(GetBooks)).Methods("GET")           // 모든 책 조회
-	router.HandleFunc("/books/{id}", authMiddleware(GetBook)).Methods("GET")       // 특정 ID의 책 조회
-	router.HandleFunc("/books", authMiddleware(CreateBook)).Methods("POST")        // 새로운 책 추가
-	router.HandleFunc("/books/{id}", authMiddleware(UpdateBook)).Methods("PUT")    // 책 정보 수정
-	router.HandleFunc("/books/{id}", authMiddleware(DeleteBook)).Methods("DELETE") // 책 삭제
+	// 인증 미들웨어 생성
+	auth := authMiddleware(config.APIKey)
 
-	//서버 실행
-	log.Fatal(http.ListenAndServe(":8000", router))
+	router := mux.NewRouter()
+
+	// 헬스체크 엔드포인트 (인증 불필요)
+	router.HandleFunc("/health", HealthCheck).Methods("GET")
+
+	// API 엔드포인트들
+	router.HandleFunc("/books", auth(GetBooks)).Methods("GET")
+	router.HandleFunc("/books/{id}", auth(GetBook)).Methods("GET")
+	router.HandleFunc("/books", auth(CreateBook)).Methods("POST")
+	router.HandleFunc("/books/{id}", auth(UpdateBook)).Methods("PUT")
+	router.HandleFunc("/books/{id}", auth(DeleteBook)).Methods("DELETE")
+
+	// 서버 시작
+	log.Printf("서버가 포트 %s에서 시작됩니다...", config.Port)
+	log.Fatal(http.ListenAndServe(":"+config.Port, router))
 }
